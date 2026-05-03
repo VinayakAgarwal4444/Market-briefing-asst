@@ -1,0 +1,39 @@
+# Domain-specific questions whose answers live in the scraped pandas/NumPy/sklearn docs.
+# `expected_keywords` are matched case-insensitively as substrings.
+# Stems are used (e.g. "memor" matches "memory" and "memorize") to avoid
+# penalising correct answers that use a synonym or different inflection.
+- question: "What does the chunksize parameter of pd.read_csv do?"
+  expected_keywords: ["iterator", "memor", "chunk"]
+
+- question: "How does NumPy broadcasting handle a (3,1) array combined with a (1,4) array?"
+  expected_keywords: ["broadcast", "shape"]
+
+- question: "What is the difference between Pipeline and make_pipeline in scikit-learn?"
+  expected_keywords: ["named", "automatically", "make_pipeline"]
+
+- question: "How do I select rows in a DataFrame by label using pandas?"
+  expected_keywords: [".loc", "label", "DataFrame"]
+
+- question: "What does GroupBy.transform return compared to GroupBy.aggregate?"
+  expected_keywords: ["transform", "aggregat", "shape"]
+
+- question: "What functions does pandas provide for handling missing data?"
+  expected_keywords: ["fillna", "dropna", "isna"]
+
+- question: "What does numpy.asarray do that numpy.array does not?"
+  expected_keywords: ["copy", "existing"]
+
+- question: "How does cross_val_score work in scikit-learn?"
+  expected_keywords: ["cross-validation", "fold", "score"]
+
+- question: "What is the difference between fit_transform and transform in scikit-learn preprocessing?"
+  expected_keywords: ["fit", "transform", "training"]
+
+- question: "How do you merge two DataFrames on a common column in pandas?"
+  expected_keywords: ["merge", "on"]
+
+- question: "What does StratifiedKFold do that KFold does not?"
+  expected_keywords: ["class", "proportion", "stratif"]
+
+- question: "How does NumPy's view differ from a copy?"
+  expected_keywords: ["share", "data"]
