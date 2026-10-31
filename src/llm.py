@@ -17,6 +17,7 @@ from langchain_core.language_models import BaseChatModel
 from config import (
     GROQ_API_KEY,
     GROQ_LLM_MODEL,
+    GROQ_REASONING_EFFORT,
     LLM_PROVIDER,
     OLLAMA_HOST,
     OLLAMA_LLM_MODEL,
@@ -68,7 +69,13 @@ def get_llm() -> BaseChatModel:
             )
         from langchain_groq import ChatGroq
 
-        return ChatGroq(model=GROQ_LLM_MODEL, api_key=GROQ_API_KEY, temperature=0.0)
+        # The model's reasoning arrives in a separate field, so only the answer is streamed.
+        return ChatGroq(
+            model=GROQ_LLM_MODEL,
+            api_key=GROQ_API_KEY,
+            temperature=0.0,
+            reasoning_effort=GROQ_REASONING_EFFORT or None,
+        )
 
     raise ProviderUnavailableError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}. Expected one of: ollama, groq.")
 

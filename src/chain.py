@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from config import RETRIEVAL_K, SEARCH_WINDOW_HOURS
 from src import store
-from src.llm import get_llm
+from src.llm import ProviderUnavailableError, get_llm, model_label
 from src.market import Quote, detect_symbols, format_quote, get_quotes, symbol_terms
 from src.retriever import Hit, StoryIndex
 from src.stories import Story, group
@@ -197,9 +197,18 @@ def stream(prepared: Prepared) -> Iterator[str]:
         # Nothing to ground an answer in: don't give the model the chance to improvise.
         yield NO_COVERAGE.format(hours=SEARCH_WINDOW_HOURS)
         return
-    for chunk in get_llm().stream(prepared.messages):
-        if chunk.content:
-            yield chunk.content
+    try:
+        for chunk in get_llm().stream(prepared.messages):
+            if chunk.content:
+                yield chunk.content
+    except ProviderUnavailableError:
+        raise
+    except Exception as exc:
+        # A retired model, a rate limit or an outage: show a message, not a crash.
+        raise ProviderUnavailableError(
+            f"{model_label()} returned an error ({type(exc).__name__}). Try again shortly; if it "
+            "keeps happening, the model name or API key in the app's settings needs checking."
+        ) from exc
 
 
 def check_citations(text: str, n_hits: int, has_quotes: bool) -> tuple[list[int], bool, list[str]]:

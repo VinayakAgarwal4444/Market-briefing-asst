@@ -9,7 +9,11 @@ from. Prices come from a live market-data feed, never from the model.
 - **Says when it doesn't know:** questions the news doesn't cover get "Nothing in the last 48 hours of coverage addresses that." instead of a guess.
 - **No advice:** "Should I buy...?" is caught in code and answered with what was reported, never a recommendation.
 
-Built with Python, LangChain, Ollama (Llama 3.1 8B) or Groq, fastembed, BM25, SQLite and Streamlit.
+Built with Python, LangChain, Ollama (Llama 3.1 8B, local) or Groq (gpt-oss-20b, hosted), fastembed, BM25, SQLite and Streamlit.
+
+The evaluation below was run with Llama 3.1 8B on Ollama. Groq retired that
+model in August 2026, so the hosted app uses its named replacement,
+gpt-oss-20b, which has not been through the same evaluation yet.
 
 ## Why retrieval matters here
 
@@ -138,7 +142,7 @@ Settings live in `.env` (copy `.env.example`). The ones you're most likely to ch
 |---|---|---|
 | `LLM_PROVIDER` | `ollama` | `ollama` (local GPU) or `groq` (cloud, free tier) |
 | `OLLAMA_LLM_MODEL` | `llama3.1:8b` | Local model |
-| `GROQ_API_KEY` / `GROQ_LLM_MODEL` | - / `llama-3.1-8b-instant` | Cloud model |
+| `GROQ_API_KEY` / `GROQ_LLM_MODEL` | - / `openai/gpt-oss-20b` | Cloud model |
 | `SEARCH_WINDOW_HOURS` | `48` | How far back answers can draw on |
 | `REFRESH_MINUTES` | `20` | How stale the feeds may get before the app re-reads them |
 | `SEC_USER_AGENT` | empty | Set to `"Name email"` to add SEC 8-K filings |

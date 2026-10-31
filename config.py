@@ -66,7 +66,10 @@ OLLAMA_LLM_MODEL: str = os.getenv("OLLAMA_LLM_MODEL", "llama3.1:8b")
 
 # Free tier, no card. Get a key at https://console.groq.com.
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "llama-3.1-8b-instant")
+# Groq retired llama-3.1-8b-instant on 16 Aug 2026; gpt-oss-20b is its
+# named replacement. It reasons before answering: "low" keeps that short.
+GROQ_LLM_MODEL: str = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-20b")
+GROQ_REASONING_EFFORT: str = os.getenv("GROQ_REASONING_EFFORT", "low")  # low | medium | high; empty for non-reasoning models
 
 # --- Embeddings -------------------------------------------------------------
 # Runs in-process on CPU via ONNX (fastembed), so local and cloud use the
