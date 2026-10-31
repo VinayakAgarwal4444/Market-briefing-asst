@@ -4,6 +4,8 @@ Ask what moved markets and why, and get an answer built only from the past
 48 hours of financial news, with every claim linked to the article it came
 from. Prices come from a live market-data feed, never from the model.
 
+**Live demo:** <https://ta2cjxqtjcczdu4iiihidv.streamlit.app/>
+
 - **Briefing:** the five biggest stories of the last 24 hours, written up with citations.
 - **Ask:** questions like *"Why did Intel stock fall?"* or *"What did the ECB decide?"*, with follow-ups.
 - **Says when it doesn't know:** questions the news doesn't cover get "Nothing in the last 48 hours of coverage addresses that." instead of a guess.
