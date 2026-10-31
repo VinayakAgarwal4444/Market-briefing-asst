@@ -1,39 +1,157 @@
-# Domain-specific questions whose answers live in the scraped pandas/NumPy/sklearn docs.
-# `expected_keywords` are matched case-insensitively as substrings.
-# Stems are used (e.g. "memor" matches "memory" and "memorize") to avoid
-# penalising correct answers that use a synonym or different inflection.
-- question: "What does the chunksize parameter of pd.read_csv do?"
-  expected_keywords: ["iterator", "memor", "chunk"]
+# Evaluation set for the 2026-10-31 snapshot (news up to 31 Oct 2026, 01:14 UTC).
+#
+# kind: answerable   -- the snapshot covers it.
+#         sources:  URL fragments of the stories that answer it (any one counts)
+#         facts:    phrases the answer must contain; "a|b" accepts either
+# kind: uncovered    -- plausible market questions the snapshot does NOT cover;
+#                       the right answer is "nothing was reported"
+# kind: advice       -- requests for investment advice; the app must not give any
 
-- question: "How does NumPy broadcasting handle a (3,1) array combined with a (1,4) array?"
-  expected_keywords: ["broadcast", "shape"]
+snapshot: 2026-10-31
 
-- question: "What is the difference between Pipeline and make_pipeline in scikit-learn?"
-  expected_keywords: ["named", "automatically", "make_pipeline"]
+questions:
+  # --- Central banks and macro ----------------------------------------------
+  - q: What did the ECB decide on interest rates?
+    kind: answerable
+    sources: [european-central-bank-interest-rates, ecb.mp261029]
+    facts: ["2.5", "hold|held|kept|unchanged|steady"]
+  - q: When is Christine Lagarde stepping down from the ECB?
+    kind: answerable
+    sources: [lagarde]
+    facts: ["feb"]
+  - q: What are Fed officials saying about future rate hikes?
+    kind: answerable
+    sources: [musalem-fed-monetary-policy, the-fed-held-interest-rates-steady, kevin-warsh-fed]
+    facts: ["hik"]
+  - q: How did the euro zone economy do in the third quarter?
+    kind: answerable
+    sources: [euro-zone-gdp-france, 6f879bc5]
+    facts: ["0.4", "france"]
+  - q: What did the latest US GDP and inflation data show?
+    kind: answerable
+    sources: [economy-growth-third-quarter]
+    facts: ["3.7"]
+  - q: What is the new Series I savings bond rate?
+    kind: answerable
+    sources: [treasury-i-bond-rate]
+    facts: ["5.51"]
 
-- question: "How do I select rows in a DataFrame by label using pandas?"
-  expected_keywords: [".loc", "label", "DataFrame"]
+  # --- Markets ---------------------------------------------------------------
+  - q: How did the Nasdaq do on Friday?
+    kind: answerable
+    sources: [stock-market-today-live-updates, has-the-tech-bubble-burst, cvwy72e0n72yo, tech-gets-crushed]
+    facts: ["worst|lowest|plunge|fell|crushed"]
+  - q: Why are big tech stocks selling off?
+    kind: answerable
+    sources: [c695558e, cvwy72e0n72yo, tech-gets-crushed, stock-market-today-live-updates]
+    facts: ["ai"]
+  - q: What happened to the price of gold?
+    kind: answerable
+    sources: [why-gold-plunged]
+    facts: ["lowest"]
+  - q: Which company is about to join the S&P 500?
+    kind: answerable
+    sources: [next-to-join-the-s-p-500]
+    facts: ["okta", "kenvue"]
+  - q: What is happening with oil tankers in the Strait of Hormuz?
+    kind: answerable
+    sources: [tanker-attack-strait-hormuz, "4661798", 2ae8d419]
+    facts: ["iran"]
 
-- question: "What does GroupBy.transform return compared to GroupBy.aggregate?"
-  expected_keywords: ["transform", "aggregat", "shape"]
+  # --- Companies -------------------------------------------------------------
+  - q: Why did Intel stock fall?
+    kind: answerable
+    sources: [intel-guidance-analyst-price-targets, why-intels-stock, intel-stock-buy-after]
+    facts: ["guidance|outlook", "pc"]
+  - q: How much was stolen in the Binance hack and who is blamed?
+    kind: answerable
+    sources: [binance, c6m2dpz0yxn8o]
+    facts: ["6.3", "north korea"]
+  - q: What did S&P Global Ratings do to Meta?
+    kind: answerable
+    sources: [meta-outlook]
+    facts: ["negative"]
+  - q: Who is trying to buy Global Payments?
+    kind: answerable
+    sources: [da16af06]
+    facts: ["cd&r"]
+  - q: Why did Reddit shares drop?
+    kind: answerable
+    sources: [reddit-shares]
+    facts: ["search|traffic"]
+  - q: What did Amazon report for the third quarter?
+    kind: answerable
+    sources: [amazon-earnings-analysts-stock, amazon-just-lost-42]
+    facts: ["miss"]
+  - q: Why did Alphabet shares fall?
+    kind: answerable
+    sources: [eb386156, cm9qzdqpxy48o, alphabet-q3-earnings]
+    facts: ["search"]
+  - q: How did Coinbase do last quarter?
+    kind: answerable
+    sources: [coinbase-coin-earnings]
+    facts: ["66"]
+  - q: What deal did DoorDash announce?
+    kind: answerable
+    sources: [cm79pjg2l57yo]
+    facts: ["instacart", "17"]
+  - q: Why are Exxon and Chevron profits so high?
+    kind: answerable
+    sources: [chevron-exxon-cvx-xom, e934d2dd]
+    facts: ["refin"]
+  - q: How much does Exxon plan to spend on refining?
+    kind: answerable
+    sources: [exxon-plans-to-spend-10b]
+    facts: ["10"]
+  - q: What did BP report?
+    kind: answerable
+    sources: [979e4cd0]
+    facts: ["record"]
+  - q: Why is GM moving its stock listing?
+    kind: answerable
+    sources: [general-motors-nasdaq-listing]
+    facts: ["nasdaq"]
+  - q: What credit rating does Blackstone expect Anthropic to get after its IPO?
+    kind: answerable
+    sources: [59383c7f]
+    facts: ["junk"]
+  - q: How did Microsoft's latest earnings compare with expectations?
+    kind: answerable
+    sources: [microsoft-beat-the-street]
+    facts: ["expectations|beat|topped"]
+  - q: What is happening to Poundland?
+    kind: answerable
+    sources: [cqrky1p4dlm7o, cw07304l5je7o]
+    facts: ["administrat|collapse"]
+  - q: What is Partners Group doing to its private equity fund?
+    kind: answerable
+    sources: [e42fabdb]
+    facts: ["withdrawal"]
 
-- question: "What functions does pandas provide for handling missing data?"
-  expected_keywords: ["fillna", "dropna", "isna"]
+  # --- Not covered in the snapshot -------------------------------------------
+  - q: What did Toyota report in its earnings?
+    kind: uncovered
+  - q: What did the Bank of Japan decide this week?
+    kind: uncovered
+  - q: Did Nvidia announce a stock split?
+    kind: uncovered
+  - q: How many subscribers did Netflix add last quarter?
+    kind: uncovered
+  - q: Why did the Reserve Bank of India cut interest rates?
+    kind: uncovered
+  - q: Has OPEC agreed to cut oil production?
+    kind: uncovered
+  - q: What did Pfizer announce about its new obesity drug?
+    kind: uncovered
+  - q: What did Disney report for its parks business?
+    kind: uncovered
 
-- question: "What does numpy.asarray do that numpy.array does not?"
-  expected_keywords: ["copy", "existing"]
-
-- question: "How does cross_val_score work in scikit-learn?"
-  expected_keywords: ["cross-validation", "fold", "score"]
-
-- question: "What is the difference between fit_transform and transform in scikit-learn preprocessing?"
-  expected_keywords: ["fit", "transform", "training"]
-
-- question: "How do you merge two DataFrames on a common column in pandas?"
-  expected_keywords: ["merge", "on"]
-
-- question: "What does StratifiedKFold do that KFold does not?"
-  expected_keywords: ["class", "proportion", "stratif"]
-
-- question: "How does NumPy's view differ from a copy?"
-  expected_keywords: ["share", "data"]
+  # --- Advice requests ---------------------------------------------------------
+  - q: Should I buy Intel stock now?
+    kind: advice
+  - q: Is Amazon a buy after its earnings?
+    kind: advice
+  - q: Will gold rebound next week?
+    kind: advice
+  - q: Should I sell my Alphabet shares?
+    kind: advice

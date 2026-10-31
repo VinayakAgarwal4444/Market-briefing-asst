@@ -1,65 +1,74 @@
-"""Load the persisted FAISS index and expose a configured retriever.
+"""Hybrid search over the stories in the news window.
 
-Default is a hybrid retriever that ensembles a lexical BM25 retriever with
-the dense FAISS retriever. This fixes a real failure mode we observed in
-evaluation: dense embeddings sometimes miss queries that contain very
-specific symbols (e.g. "StratifiedKFold") because the embedding distance
-between the query and the right passage is large despite the verbatim
-overlap. BM25 handles those queries well, while FAISS handles paraphrased
-or conceptual queries -- ensembling gives us the best of both.
+Ranking = reciprocal-rank fusion of two retrievers:
+
+* **Dense** (bge-small cosine) catches paraphrases: "chip stocks" finds
+  "semiconductor shares".
+* **BM25** catches exact names and tickers that embeddings blur:
+  "Okta", "Series I bond", "INTC".
+
+An optional recency boost multiplies the fused score by
+``(1 - w) + w * 0.5^(age / half_life)``. It is off by default
+(``RECENCY_WEIGHT=0``): on the evaluation set even w = 0.05 pushed correct
+but day-old stories down the ranking (hit@1 27/28 -> 25/28; w = 0.4 gave
+20/28), because fused scores sit so close together that any multiplier
+reorders them. The 48-hour window already keeps everything fresh.
+
+A few hundred headlines fit in one matrix, so dense search is a single
+exact matrix-vector product -- an approximate index (FAISS, HNSW) would
+add a dependency and buy nothing at this size.
 """
 from __future__ import annotations
 
 import re
-from functools import lru_cache
+import time
+from dataclasses import dataclass
 
-from langchain_classic.retrievers import EnsembleRetriever
-from langchain_community.retrievers import BM25Retriever
-from langchain_community.vectorstores import FAISS
-from langchain_core.retrievers import BaseRetriever
+import numpy as np
+from rank_bm25 import BM25Okapi
 
 from config import (
-    RETRIEVAL_BM25_WEIGHT,
-    RETRIEVAL_FETCH_K,
-    RETRIEVAL_HYBRID,
+    RECENCY_HALF_LIFE_HOURS,
+    RECENCY_WEIGHT,
     RETRIEVAL_K,
-    RETRIEVAL_SEARCH_TYPE,
-    VECTORSTORE_DIR,
+    RRF_K,
 )
-from src.llm import get_embeddings
+from src.embed import embed_query
+from src.stories import Story
 
+# A story reaches the LLM only if it is close to the question in absolute
+# terms AND not far behind the best match. Without the relative cut, every
+# question drags in a tail of loosely related market stories (cosine ~0.6)
+# that the model then feels obliged to mention. A strong keyword match (at
+# least half the best BM25 score) lifts the relative cut but never the
+# absolute one: in the evaluation every correct story scored >= 0.66, while
+# keyword-only noise on uncovered questions scored 0.45-0.64. Dropping weak
+# matches is what lets the assistant say "nothing was reported" instead of
+# stretching a loose one.
+MIN_DENSE_SIMILARITY = 0.62
+MAX_GAP_FROM_BEST = 0.15
+STRONG_KEYWORD_SHARE = 0.5
 
-class VectorstoreMissingError(RuntimeError):
-    """Raised when no FAISS index exists on disk."""
+# Headlines spell out what people abbreviate (and vice versa), which BM25
+# can't see: "ECB" never matches "European Central Bank keeps rate on hold".
+ABBREVIATIONS: dict[str, str] = {
+    "ecb": "european central bank",
+    "fed": "federal reserve",
+    "fomc": "federal reserve",
+    "boe": "bank of england",
+    "boj": "bank of japan",
+    "pboc": "people's bank of china",
+    "cpi": "inflation consumer price",
+    "ppi": "producer price",
+    "pce": "inflation",
+    "gdp": "economy growth",
+    "nfp": "payrolls jobs",
+    "ipo": "listing",
+    "opec": "oil",
+    "m&a": "merger acquisition deal",
+    "treasuries": "treasury bond yield",
+}
 
-
-@lru_cache(maxsize=1)
-def load_vectorstore() -> FAISS:
-    if not (VECTORSTORE_DIR / "index.faiss").exists():
-        raise VectorstoreMissingError(
-            f"No FAISS index found at {VECTORSTORE_DIR}. "
-            "Build it first: python scripts/build_index.py"
-        )
-    return FAISS.load_local(
-        str(VECTORSTORE_DIR),
-        get_embeddings(),
-        allow_dangerous_deserialization=True,
-    )
-
-
-def _dense_retriever(k: int) -> BaseRetriever:
-    if RETRIEVAL_SEARCH_TYPE == "mmr":
-        return load_vectorstore().as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": k, "fetch_k": RETRIEVAL_FETCH_K},
-        )
-    return load_vectorstore().as_retriever(search_kwargs={"k": k})
-
-
-# A small English stopword list. We deliberately avoid pulling in NLTK
-# for this -- the list below catches the question-shaped noise ("what",
-# "does", "between", ...) that otherwise drowns out rare informative
-# tokens like "StratifiedKFold".
 _STOPWORDS = frozenset(
     """
     a an and are as at be been being but by can could did do does doing
@@ -67,54 +76,119 @@ _STOPWORDS = frozenset(
     such than that the their them then there these they this those to
     too was we were what when where which who why will with would you
     your not no yes any all more most some between also however whether
+    about after again today yesterday latest news happened happening going
+    tell me us any update updates week day hours last past recent recently
     """.split()
 )
-
-# Word-token regex that PRESERVES identifiers like StratifiedKFold and
-# numpy_asarray; punctuation including dots becomes a separator so that
-# "numpy.asarray" tokenises to ["numpy", "asarray"].
-_TOKEN_RE = re.compile(r"[A-Za-z_]\w*", re.ASCII)
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9&.\-]*[a-z0-9]|[a-z0-9]")
 
 
-def _bm25_preprocess(text: str) -> list[str]:
-    return [
-        m.group(0).lower()
-        for m in _TOKEN_RE.finditer(text)
-        if m.group(0).lower() not in _STOPWORDS
-    ]
+def _stem(token: str) -> str:
+    """Fold plurals so "rates" matches "rate" (deliberately minimal)."""
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us", "is")):
+        return token[:-1]
+    return token
 
 
-def _bm25_retriever(k: int) -> BM25Retriever:
-    """Build a BM25 retriever over the same chunks indexed in FAISS.
-
-    BM25Retriever needs the chunk texts directly; we read them out of the
-    FAISS docstore so dense and lexical retrievers operate on identical
-    chunks (no risk of drift from re-chunking).
-
-    A custom preprocessor strips stopwords and lowercases tokens so rare
-    informative tokens (e.g. ``StratifiedKFold``) dominate scoring instead
-    of being diluted by question-shaped filler words.
-    """
-    vs = load_vectorstore()
-    docs = list(vs.docstore._dict.values())  # noqa: SLF001 -- docstore has no public iterator
-    retriever = BM25Retriever.from_documents(
-        docs,
-        preprocess_func=_bm25_preprocess,
-    )
-    retriever.k = k
-    return retriever
+def tokenize(text: str) -> list[str]:
+    return [_stem(t) for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
 
 
-def get_retriever(k: int | None = None) -> BaseRetriever:
-    """Return the configured retriever (hybrid by default)."""
-    k = k or RETRIEVAL_K
-    dense = _dense_retriever(k)
-    if not RETRIEVAL_HYBRID:
-        return dense
+def expand_query(text: str) -> str:
+    extra = [ABBREVIATIONS[t] for t in _TOKEN_RE.findall(text.lower()) if t in ABBREVIATIONS]
+    return " ".join([text, *extra])
 
-    bm25 = _bm25_retriever(k)
-    bm25_w = max(0.0, min(1.0, RETRIEVAL_BM25_WEIGHT))
-    return EnsembleRetriever(
-        retrievers=[bm25, dense],
-        weights=[bm25_w, 1.0 - bm25_w],
-    )
+
+def recency_factor(age_hours: float, weight: float = RECENCY_WEIGHT) -> float:
+    if weight <= 0:
+        return 1.0
+    decay = 0.5 ** (max(age_hours, 0.0) / RECENCY_HALF_LIFE_HOURS)
+    return (1 - weight) + weight * decay
+
+
+def _add_rrf(fused: np.ndarray, scores: np.ndarray, positive_only: bool = False) -> None:
+    """Add each item's reciprocal-rank-fusion share for one ranking."""
+    for rank, idx in enumerate(np.argsort(-scores)):
+        if positive_only and scores[idx] <= 0:
+            break
+        fused[idx] += 1.0 / (RRF_K + rank + 1)
+
+
+def _floors(dense: np.ndarray, lexical: np.ndarray, use_dense: bool) -> tuple[float, float, float]:
+    """(absolute, relative) cosine cut-offs and the BM25 score that counts as a strong keyword match."""
+    if not use_dense:  # keyword-only: any match counts
+        return -np.inf, np.inf, 1e-9
+    relative = max(MIN_DENSE_SIMILARITY, float(dense.max()) - MAX_GAP_FROM_BEST)
+    keyword = STRONG_KEYWORD_SHARE * float(lexical.max()) if lexical.max() > 0 else np.inf
+    return MIN_DENSE_SIMILARITY, relative, keyword
+
+
+@dataclass
+class Hit:
+    story: Story
+    score: float
+    dense: float  # best cosine similarity among the story's items
+    keyword: bool  # True if BM25 matched any of the story's items
+
+
+class StoryIndex:
+    """Search structure over one snapshot of stories."""
+
+    def __init__(self, stories: list[Story]):
+        self.stories = stories
+        self._items = [(s_idx, item) for s_idx, s in enumerate(stories) for item in s.items]
+        self._vectors = (
+            np.stack([item.embedding for _, item in self._items]) if self._items else np.zeros((0, 384))
+        )
+        self._published = [item.published for _, item in self._items]
+        corpus = [tokenize(f"{i.title} {i.summary} {' '.join(i.tickers)}") for _, i in self._items]
+        self._bm25 = BM25Okapi(corpus) if corpus else None
+
+    def search(
+        self,
+        query: str,
+        k: int = RETRIEVAL_K,
+        extra_terms: list[str] | None = None,
+        now: float | None = None,
+        mode: str = "hybrid",
+        recency_weight: float = RECENCY_WEIGHT,
+    ) -> list[Hit]:
+        """Top-k stories for `query`.
+
+        `mode` ("hybrid", "dense" or "bm25") and `recency_weight` exist so the
+        evaluation can compare configurations; the app uses the defaults.
+        """
+        if not self._items:
+            return []
+        now = now or time.time()
+
+        use_dense, use_bm25 = mode in ("hybrid", "dense"), mode in ("hybrid", "bm25")
+        n = len(self._items)
+        dense = self._vectors @ embed_query(query) if use_dense else np.zeros(n)
+        terms = tokenize(expand_query(" ".join([query, *(extra_terms or [])])))
+        lexical = self._bm25.get_scores(terms) if use_bm25 and terms else np.zeros(n)
+
+        fused = np.zeros(n)
+        if use_dense:
+            _add_rrf(fused, dense)
+        if use_bm25:
+            _add_rrf(fused, lexical, positive_only=True)
+
+        absolute_floor, relative_floor, keyword_floor = _floors(dense, lexical, use_dense)
+        keyword = lexical >= keyword_floor
+        keep = (dense >= absolute_floor) & ((dense >= relative_floor) | keyword)
+        recency = np.array([recency_factor((now - p) / 3600, recency_weight) for p in self._published])
+        return self._collapse(np.flatnonzero(keep), fused * recency, dense, keyword)[:k]
+
+    def _collapse(self, kept: np.ndarray, scores: np.ndarray, dense: np.ndarray, keyword: np.ndarray) -> list[Hit]:
+        """Merge item matches into story hits; a story scores as its best item."""
+        best: dict[int, Hit] = {}
+        for idx in kept:
+            s_idx = self._items[idx][0]
+            hit = best.setdefault(s_idx, Hit(self.stories[s_idx], 0.0, -1.0, False))
+            hit.score = max(hit.score, float(scores[idx]))
+            hit.dense = max(hit.dense, float(dense[idx]))
+            hit.keyword = hit.keyword or bool(keyword[idx])
+        return sorted(best.values(), key=lambda h: h.score, reverse=True)

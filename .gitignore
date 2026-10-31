@@ -13,16 +13,14 @@ env/
 .env
 .streamlit/secrets.toml
 
-# Runtime logs from build_index.py / evaluate.py
+# Runtime logs
 *.log
 
-# Project artifacts
-data/raw/
-
-# The FAISS index is intentionally NOT gitignored: committing it lets
-# Streamlit Cloud (or any other deploy) skip the scrape+embed step on
-# cold start. It's ~10 MB and built reproducibly. Gitignore the raw
-# HTML cache instead -- that one is sizable and easily regenerated.
+# The live news store is rebuilt from the feeds on first run. Evaluation
+# snapshots in eval/snapshots/ ARE committed: they make the results
+# reproducible after the news has moved on.
+data/*.db
+data/*.db-journal
 
 # IDE / OS
 .idea/

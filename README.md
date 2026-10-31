@@ -1,245 +1,159 @@
-# RAG-Based AI Teaching Assistant: Intro to Python Data Science
+# Market Briefing: a cited chat assistant for the last 48 hours of financial news
 
-A fully-local Retrieval-Augmented Generation (RAG) assistant that answers
-student questions about **pandas**, **NumPy**, and **scikit-learn** strictly
-from the official documentation it has indexed — so it cites sources instead
-of hallucinating.
+Ask what moved markets and why, and get an answer built only from the past
+48 hours of financial news, with every claim linked to the article it came
+from. Prices come from a live market-data feed, never from the model.
 
-> Built with **LangChain** (modern LCEL `create_retrieval_chain`), **Ollama**
-> (`llama3.2` + `nomic-embed-text`), **FAISS**, and **Streamlit**. No API
-> keys, no cloud calls, runs end-to-end on a laptop.
+- **Briefing:** the five biggest stories of the last 24 hours, written up with citations.
+- **Ask:** questions like *"Why did Intel stock fall?"* or *"What did the ECB decide?"*, with follow-ups.
+- **Says when it doesn't know:** questions the news doesn't cover get "Nothing in the last 48 hours of coverage addresses that." instead of a guess.
+- **No advice:** "Should I buy...?" is caught in code and answered with what was reported, never a recommendation.
 
----
+Built with Python, LangChain, Ollama (Llama 3.1 8B) or Groq, fastembed, BM25, SQLite and Streamlit.
 
-## Architecture
+## Why retrieval matters here
+
+A language model's knowledge stops at its training cut-off, so it cannot know
+what happened yesterday. Asked closed-book, it either refuses or invents an
+answer. That makes recent news the clearest possible case for retrieval: the
+model only has to read and cite, and the evaluation below measures how well
+it does that.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    subgraph ingestPhase [Indexing Pipeline - one-time]
-        Scrape[Scrape pandas, numpy,<br/>sklearn docs] --> Clean[Clean HTML to text]
-        Clean --> Split["RecursiveCharacterTextSplitter<br/>chunk=700, overlap=80"]
-        Split --> Embed[Ollama nomic-embed-text]
-        Embed --> Store[(FAISS index<br/>on disk)]
+    subgraph refresh [Every 20 minutes]
+        Feeds[11 RSS feeds<br/>CNBC, FT, BBC, Fed, ECB...] --> Clean[Clean and de-duplicate]
+        Clean --> Embed[Embed headline<br/>and summary]
+        Embed --> DB[(SQLite<br/>rolling 72 h)]
     end
-    subgraph queryPhase [Query Time]
-        UserQ[User question] --> EmbedQ[Embed question]
-        EmbedQ --> Dense["FAISS dense search<br/>(MMR, k=8)"]
-        UserQ --> BM25["BM25 lexical search<br/>(stopword-filtered, k=8)"]
-        Store -.-> Dense
-        Store -.-> BM25
-        Dense --> Fuse["EnsembleRetriever<br/>(RRF fusion, 50/50)"]
-        BM25 --> Fuse
-        Fuse --> Prompt[System prompt + context + question]
-        Prompt --> LLM[Ollama llama3.2]
-        LLM --> Answer[Grounded answer + source URLs]
+    subgraph ask [Each question]
+        Q[Question] --> Group[Group articles<br/>into stories]
+        DB --> Group
+        Group --> Hybrid[Hybrid search<br/>BM25 + dense, RRF]
+        Q --> Tickers[Spot tickers] --> Quotes[Live quotes<br/>Yahoo Finance]
+        Hybrid --> Prompt[Prompt with<br/>numbered stories]
+        Quotes --> Prompt
+        Prompt --> LLM[Llama 3.1 8B]
+        LLM --> Check[Check every citation]
+        Check --> UI[Streamlit]
     end
-    UI[Streamlit chat UI] --> UserQ
-    Answer --> UI
 ```
 
-## Why this exists
+1. **Ingest** (`src/feeds.py`, `src/store.py`). Eleven free RSS feeds are read in parallel. Only the headline, the feed's own summary and the link are stored, never the article, so every answer sends readers back to the publisher. Tracking parameters, inline CSS and boilerplate are stripped, and items older than the 72-hour retention window are skipped.
+2. **Group into stories** (`src/stories.py`). The same event is reported by five outlets within an hour. Articles whose *headlines* are at least 0.8 similar become one story, unless they name different tickers. Grouping on headlines rather than summaries matters: a live blog whose summary rounds up the whole day matched every story it mentioned.
+3. **Search** (`src/retriever.py`). BM25 catches exact names ("Okta", "Series I bond"); embeddings catch paraphrases ("chip stocks" finds "semiconductor shares"). The two rankings are merged with reciprocal-rank fusion. Abbreviations are expanded ("ECB" also searches "European Central Bank"), and stories below a similarity floor never reach the model, which is what lets it say "nothing reported".
+4. **Quote** (`src/market.py`). Tickers and company names in the question ("Intel", "$AMD", "the S&P 500") are looked up live. The model sees prices only in a labelled MARKET DATA block and is told not to state any other numbers.
+5. **Answer and check** (`src/chain.py`). Stories are numbered `[1]`, `[2]`... and prices are `[M]`. After the answer is generated, every citation is checked against what was actually supplied, and the app flags any that point at nothing.
 
-A vanilla LLM, asked something like _"What does the `chunksize` parameter of
-`pd.read_csv` do?"_, will often confidently invent details. This project
-demonstrates the standard fix: ground the model in a curated corpus, retrieve
-the most relevant chunks at query time, and force the model to answer **only
-from those chunks** with citations. The `eval/` script quantifies the
-difference.
+A few hundred headlines fit in one matrix, so search is an exact matrix-vector product. An approximate index (FAISS, HNSW) would add a dependency and buy nothing at this size.
 
-## Prerequisites
+## Evaluation
 
-1. **Python 3.10+**
-2. **Ollama** installed and running locally — see <https://ollama.com/download>
-3. Pull the two models the assistant uses:
+The news changes every few minutes, so the evaluation runs on a frozen
+snapshot (`eval/snapshots/2026-10-31.db`: 137 stories, 159 articles) with 40
+hand-written questions (`eval/questions.yaml`):
 
-   ```bash
-   ollama pull llama3.2
-   ollama pull nomic-embed-text
-   ```
+- **28 answerable**, each with the story that answers it and the facts the answer must contain.
+- **8 uncovered:** plausible questions the snapshot does not cover (Toyota earnings, the Bank of Japan, an Nvidia stock split...). The right answer is "nothing was reported".
+- **4 advice requests** ("Should I buy Intel stock now?").
 
-4. Make sure the Ollama server is up (it auto-starts on most installs):
+### Retrieval: does the right story reach the model?
 
-   ```bash
-   ollama serve   # only needed if it isn't already running
-   ```
+| Configuration | Right story ranked 1st | In top 3 | In context (top 8) | MRR | Stories passed on uncovered questions |
+|---|---|---|---|---|---|
+| Dense only | 26/28 | 28/28 | 28/28 | 0.96 | 3.0 |
+| BM25 only | 26/28 | 27/28 | 28/28 | 0.95 | 7.8 |
+| Hybrid + recency boost (w = 0.4) | 21/28 | 26/28 | 28/28 | 0.85 | 3.0 |
+| **Hybrid (the app)** | **27/28** | **28/28** | **28/28** | **0.98** | **3.0** |
 
-## Quickstart
+What the evaluation changed:
 
-```bash
-# 1. Install Python dependencies
-python -m venv .venv
-.venv\Scripts\activate          # PowerShell on Windows
-# source .venv/bin/activate      # macOS / Linux
-pip install -r requirements.txt
+- **The recency boost was removed.** It seemed obviously right for news: rank fresher stories higher. Measured, it pushed correct day-old stories down (hit@1 from 27 to 21). Even a 5% weight cost two first places, because fused scores sit so close together that any multiplier reorders them. The 48-hour window already keeps everything recent, so search no longer uses a boost. The briefing still ranks by recency, because "the most important stories of the last 24 hours" really is about freshness.
+- **Keyword matches no longer bypass the similarity floor.** Hybrid search first passed 6.6 stories to the model on uncovered questions, double the dense-only figure, because weak keyword hits slipped through. Every correct story scored at least 0.66 cosine similarity, and the keyword-only noise scored 0.45-0.64. A keyword match now lifts only the relative cut-off, which brought the noise down to 3.0 with no loss of recall.
 
-# 2. Build the knowledge base (scrape -> chunk -> embed -> FAISS).
-#    First run takes ~2-5 min depending on your machine; HTML is cached.
-python scripts/build_index.py
+### End to end
 
-# 3. Launch the chat UI
-streamlit run app.py
-```
+Llama 3.1 8B on a laptop GPU, temperature 0, live quotes switched off so the run is repeatable:
 
-You can also ask a one-off question from the CLI:
-
-```bash
-python scripts/ask.py "How does NumPy broadcasting work between (3,1) and (1,4)?"
-```
-
-## Project layout
-
-```
-.
-├── app.py                  # Streamlit chat UI
-├── config.py               # Paths, model names, chunk sizes (env-overridable)
-├── requirements.txt
-├── .env.example
-├── data/
-│   ├── raw/                # Cached HTML (gitignored)
-│   └── processed/          # Cleaned markdown w/ source_url front-matter
-├── vectorstore/            # FAISS index (committed for deploy)
-├── .streamlit/
-│   └── secrets.toml.example  # Template for Streamlit Cloud secrets
-├── src/
-│   ├── llm.py              # LLM/embeddings factories (ollama | groq | hf_endpoint)
-│   ├── scraper.py          # Curated URL list, polite fetcher, HTML->md
-│   ├── ingest.py           # Load -> Split -> Embed -> FAISS.save_local
-│   ├── retriever.py        # Hybrid BM25 + FAISS(MMR) ensemble retriever
-│   └── chain.py            # create_retrieval_chain w/ grounded system prompt
-├── scripts/
-│   ├── build_index.py      # End-to-end pipeline runner
-│   └── ask.py              # CLI Q&A
-└── eval/
-    ├── questions.yaml      # 12 hand-crafted Q&A pairs w/ expected keywords
-    ├── evaluate.py         # Baseline (no RAG) vs RAG keyword-recall scoring
-    └── results.md          # Auto-generated comparison report
-```
-
-## The system prompt that does the grounding
-
-```text
-You are a teaching assistant for Intro to Python Data Science.
-Answer the student's question using the retrieved context below.
-Synthesize across the snippets and quote specific terms from them.
-Cite the source URL after each fact in square brackets, like
-[https://...].
-
-If the context truly does not address the question, say so plainly
-and suggest where the student might look. But if the context
-contains relevant material, do NOT refuse -- give the best answer
-the context supports.
-
-Context:
-{context}
-```
-
-## Evaluation: RAG vs vanilla LLM
-
-`eval/evaluate.py` runs each question in `eval/questions.yaml` through
-**both** a vanilla `llama3.2` call (no context) and the full RAG chain,
-then measures keyword recall against an expected-keywords list per question:
-
-```bash
-python eval/evaluate.py
-```
-
-This generates `eval/results.md` with a side-by-side per-question comparison
-and an aggregate summary table:
-
-| Metric | Baseline (no RAG) | RAG |
+| Check | With retrieval | Same model, closed book |
 |---|---|---|
-| Avg keyword recall (12 questions) | 86.1% | **90.3%** |
-| Absolute improvement | — | **+4.2 pts** |
-| Wins / ties / losses | — | 3 / 8 / 1 |
+| Answerable: every expected fact in the answer | **28/28** | 8/28 |
+| Answerable: cites the story that holds the answer | **28/28** | - |
+| Answerable: wrongly says nothing was reported | 0/28 | - |
+| Uncovered: says nothing was reported | **8/8** | - |
+| Advice: caught, and no recommendation in the answer | **4/4** | - |
+| Any answer citing a source it was not given | 0/40 | - |
+| Any answer stating a number not found in its sources | 0/40 | - |
 
-The biggest individual gains came from questions that hinge on a rare
-identifier (e.g. _StratifiedKFold_, _chunksize_, _make_pipeline_), where
-the lexical half of the hybrid retriever locks onto the right doc page that
-pure embedding similarity sometimes glosses over.
+Closed book, the model admitted it lacked current information only once in 28
+questions. The other 27 times it answered confidently, usually with stale or
+invented facts. Retrieval is what makes this usable.
 
-(Numbers vary slightly between runs — re-run the eval after any
-chunking/model/prompt change.)
+Reading the answers, not just the scores, found three problems the first version of the metrics missed:
 
-## Configuration
+- **Invented "related stories".** After correctly saying "nothing was reported", the model was allowed to point to the closest related story, and used that to make one up: a Netflix quote cited as `[1]` when it had been given no stories at all. Now the model isn't called when search finds nothing, and after "nothing reported" only sentences citing a supplied story are kept.
+- **An invented figure.** One GDP answer added "better than the expected 2.8%", a number in none of its sources. Every answer is now checked for numbers that appear nowhere in its sources, and the app shows a warning under any it finds. The evaluation counts them too.
+- **A guessed year.** Story dates had no year, so the model guessed one. Dates now include it.
 
-Copy `.env.example` to `.env` and override anything:
+Full per-question results: [`eval/results.md`](eval/results.md).
+
+**Caveats.** 40 questions on one day's news is a small sample, so read the
+counts, not the percentages. The similarity floor and the recency decision
+were tuned on this same set. The honest next step is a second snapshot from a
+different day, scored without re-tuning. Keyword checks ("does the answer
+contain 2.5%?") can miss a correct paraphrase. The number check confirms that
+a figure appears in the sources, not that it is used correctly: one I-bond
+answer attached the date of the snapshot to the rate period, and the check
+passed it. Zero invented figures in this run is a result for this run, not a
+guarantee, which is why the check also runs live in the app.
+
+## Run it
+
+Requires Python 3.10+ and, for local generation, [Ollama](https://ollama.com/download).
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate            # Windows; macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+ollama pull llama3.1:8b
+
+streamlit run app.py              # fetches the feeds on first load
+```
+
+Other entry points:
+
+```bash
+python scripts/ask.py "Why did Intel stock fall?"   # one question from the terminal
+python scripts/refresh.py                           # fetch feeds (for a scheduled job)
+python scripts/snapshot.py 2026-11-07               # freeze today's news for evaluation
+python eval/evaluate.py                             # full evaluation (about 7 min on an RTX 2080)
+python eval/evaluate.py --no-llm                    # retrieval only (seconds)
+```
+
+Settings live in `.env` (copy `.env.example`). The ones you're most likely to change:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER` | `ollama` | `ollama` (local, GPU) or `groq` (cloud, free tier) |
-| `EMBED_PROVIDER` | `ollama` | `ollama` (local) or `hf_endpoint` (HF Inference) |
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_LLM_MODEL` | `llama3.2` | Local generation model |
-| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | Local embeddings model |
-| `GROQ_API_KEY` | _(unset)_ | Free key from <https://console.groq.com> |
-| `GROQ_LLM_MODEL` | `llama-3.1-8b-instant` | Cloud generation model |
-| `HF_TOKEN` | _(unset)_ | Free token from <https://huggingface.co/settings/tokens> |
-| `HF_EMBED_MODEL` | `nomic-ai/nomic-embed-text-v1.5` | **Same** weights Ollama bundles — index is cross-compatible |
-| `CHUNK_SIZE` | `700` | Characters per chunk |
-| `CHUNK_OVERLAP` | `80` | Overlap between adjacent chunks |
-| `RETRIEVAL_K` | `8` | Top-k chunks retrieved per question |
-| `RETRIEVAL_FETCH_K` | `20` | Candidates fetched before MMR re-rank |
-| `RETRIEVAL_SEARCH_TYPE` | `mmr` | `similarity` or `mmr` for diversity |
-| `RETRIEVAL_HYBRID` | `true` | Ensemble BM25 (lexical) + FAISS (dense) |
-| `RETRIEVAL_BM25_WEIGHT` | `0.5` | 0.0 = pure FAISS, 1.0 = pure BM25 |
+| `LLM_PROVIDER` | `ollama` | `ollama` (local GPU) or `groq` (cloud, free tier) |
+| `OLLAMA_LLM_MODEL` | `llama3.1:8b` | Local model |
+| `GROQ_API_KEY` / `GROQ_LLM_MODEL` | - / `llama-3.1-8b-instant` | Cloud model |
+| `SEARCH_WINDOW_HOURS` | `48` | How far back answers can draw on |
+| `REFRESH_MINUTES` | `20` | How stale the feeds may get before the app re-reads them |
+| `SEC_USER_AGENT` | empty | Set to `"Name email"` to add SEC 8-K filings |
 
-## Deploy to Streamlit Community Cloud (free)
+## Deploy to Streamlit Community Cloud
 
-The app supports two backends through a small provider abstraction in
-`src/llm.py`. Locally it runs `llama3.2` on your GPU via Ollama; on
-Streamlit Cloud it transparently swaps to **Groq** (`llama-3.1-8b-instant`)
-for generation and **HuggingFace Inference** for the
-`nomic-embed-text-v1.5` query embeddings — the *same* model the FAISS
-index was built with, so **no re-indexing is needed**. Both cloud
-providers have free personal tiers.
+1. Push the repo to GitHub.
+2. At <https://share.streamlit.io>, create an app with `app.py` as the entry point.
+3. In **App settings > Secrets**, paste `.streamlit/secrets.toml.example` with a real `GROQ_API_KEY` ([free key](https://console.groq.com/keys)).
 
-1. **Get free credentials** (each takes ~30 seconds):
-   - Groq API key: <https://console.groq.com/keys>
-   - HuggingFace token (read-only): <https://huggingface.co/settings/tokens>
+Embeddings run inside the app, so no second API key is needed. The app fetches the feeds on first load and keeps them fresh while people use it.
 
-2. **Push to GitHub**, including the `vectorstore/` folder (~10 MB,
-   committed by design — saves the cloud deploy from running the
-   ~5 min scrape+embed step on cold start):
+## Limitations
 
-   ```bash
-   git init
-   git add .
-   git commit -m "RAG teaching assistant"
-   git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin main
-   ```
-
-3. **Create the Streamlit app**:
-   - Go to <https://share.streamlit.io>, click **New app**.
-   - Pick the GitHub repo, set the entrypoint to `app.py`, click **Deploy**.
-
-4. **Add secrets** (App settings -> Secrets) — paste the contents of
-   [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example)
-   and fill in your real `GROQ_API_KEY` and `HF_TOKEN`. The shim at the
-   top of `app.py` mirrors `st.secrets` into `os.environ` before any
-   other module imports, so the same `os.getenv`-based config works
-   locally and in the cloud.
-
-5. **Done** — Streamlit auto-redeploys on every `git push`. Your live
-   URL will be `https://<repo>-<hash>.streamlit.app`.
-
-The app caption updates to show which providers are wired up
-(_LLM: Groq · `llama-3.1-8b-instant` · embed: HF · `nomic-ai/...`_) so
-you can tell at a glance which backend is in use.
-
-## Extending the corpus
-
-Add URLs to the `SOURCES` tuple in [`src/scraper.py`](src/scraper.py), then
-re-run `python scripts/build_index.py`. Already-cached HTML in `data/raw/`
-is reused for free.
-
-## Notes & limitations
-
-- **Curated, not exhaustive** — the scraper hits a hand-picked subset of
-  pages so the demo is reproducible in a few minutes. Production use would
-  expand the URL list (or swap to sitemap-based crawling).
-- **Keyword-recall is a proxy** — it's a fast, deterministic metric; for a
-  production system you'd add a judge-LLM (e.g. RAGAS) for faithfulness and
-  context-precision scores.
-- **Polite scraping** — single-threaded, 1 request/sec, real `User-Agent`,
-  and HTML responses are cached so re-runs make zero network requests.
+- **Headlines and summaries only.** The model sees what the feed publishes, usually a sentence or two, not the article. That is enough for "what happened", not for detailed analysis.
+- **Free feeds.** Coverage is broad but not complete, and Yahoo Finance prices can be delayed.
+- **An 8B model.** It sometimes skips a rule, such as citing every sentence. That's why advice detection, price figures and citation checks are done in code rather than left to the prompt.
+- **Not investment advice.** It reports what was published.

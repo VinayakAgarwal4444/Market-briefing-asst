@@ -1,17 +1,14 @@
-langchain>=1.0.0
-langchain-classic>=1.0.0
-langchain-community>=0.4.0
+langchain-core>=1.0.0
 langchain-ollama>=1.0.0
-langchain-text-splitters>=1.0.0
-# Cloud providers used by deployments (Groq for LLM, HF for embeddings).
-# Both are imported lazily so local Ollama users incur zero overhead.
+# Cloud LLM used by the Streamlit Cloud deploy; imported lazily.
 langchain-groq>=0.2.0
-langchain-huggingface>=0.1.0
-faiss-cpu>=1.8.0
+# Embeddings run in-process (ONNX on CPU), identical locally and in the cloud.
+fastembed>=0.7.0
 rank-bm25>=0.2.2
-beautifulsoup4>=4.12.0
+numpy>=1.26
+feedparser>=6.0.11
 requests>=2.31.0
-streamlit>=1.36.0
+yfinance>=1.0.0
+streamlit>=1.50.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.1
-markdownify>=0.13.0
