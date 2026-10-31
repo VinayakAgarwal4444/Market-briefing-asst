@@ -13,9 +13,8 @@ from. Prices come from a live market-data feed, never from the model.
 
 Built with Python, LangChain, Ollama (Llama 3.1 8B, local) or Groq (gpt-oss-20b, hosted), fastembed, BM25, SQLite and Streamlit.
 
-The evaluation below was run with Llama 3.1 8B on Ollama. Groq retired that
-model in August 2026, so the hosted app uses its named replacement,
-gpt-oss-20b, which has not been through the same evaluation yet.
+The hosted demo runs gpt-oss-20b on Groq, which replaced Llama 3.1 8B there
+when Groq retired it in August 2026. Both models are evaluated below.
 
 ## Why retrieval matters here
 
@@ -81,21 +80,25 @@ What the evaluation changed:
 
 ### End to end
 
-Llama 3.1 8B on a laptop GPU, temperature 0, live quotes switched off so the run is repeatable:
+Same questions, same retrieval, temperature 0, live quotes switched off so the run is repeatable. Llama 3.1 8B ran locally on Ollama; gpt-oss-20b is what the hosted demo uses:
 
-| Check | With retrieval | Same model, closed book |
+| Check | Llama 3.1 8B (local) | gpt-oss-20b (hosted) |
 |---|---|---|
-| Answerable: every expected fact in the answer | **28/28** | 8/28 |
-| Answerable: cites the story that holds the answer | **28/28** | - |
-| Answerable: wrongly says nothing was reported | 0/28 | - |
-| Uncovered: says nothing was reported | **8/8** | - |
-| Advice: caught, and no recommendation in the answer | **4/4** | - |
-| Any answer citing a source it was not given | 0/40 | - |
-| Any answer stating a number not found in its sources | 0/40 | - |
+| Answerable: every expected fact in the answer | **28/28** | **27/28** |
+| Answerable: cites the story that holds the answer | **28/28** | 26/28 |
+| Answerable: wrongly says nothing was reported | 0/28 | 0/28 |
+| Uncovered: says nothing was reported | **8/8** | **8/8** |
+| Advice: caught, and no recommendation in the answer | **4/4** | **4/4** |
+| Any answer citing a source it was not given | 0/40 | 0/40 |
+| Any answer stating a number not found in its sources | 0/40 | 0/40 |
+| *Closed book (no news): every expected fact* | *8/28* | *8/28* |
 
-Closed book, the model admitted it lacked current information only once in 28
-questions. The other 27 times it answered confidently, usually with stale or
-invented facts. Retrieval is what makes this usable.
+Closed book, Llama admitted it lacked current information once in 28
+questions and gpt-oss never did. The rest of the time both answered
+confidently, usually with stale or invented facts. Retrieval is what makes
+this usable.
+
+gpt-oss's two citation misses are answers with no citation tags at all ("according to a CNBC report"). The facts were right, but nothing linked to the source. The app now says so under any answer that marks no sources, rather than letting it look sourced.
 
 Reading the answers, not just the scores, found three problems the first version of the metrics missed:
 
@@ -103,7 +106,13 @@ Reading the answers, not just the scores, found three problems the first version
 - **An invented figure.** One GDP answer added "better than the expected 2.8%", a number in none of its sources. Every answer is now checked for numbers that appear nowhere in its sources, and the app shows a warning under any it finds. The evaluation counts them too.
 - **A guessed year.** Story dates had no year, so the model guessed one. Dates now include it.
 
-Full per-question results: [`eval/results.md`](eval/results.md).
+Switching the hosted model to gpt-oss-20b found three more:
+
+- **A different citation format.** gpt-oss sometimes cites as &#12304;1&#12305; instead of `[1]`, so those citations went unlinked and unchecked. They are now converted before any check runs.
+- **Advice by summary.** Asked "Is Amazon a buy?", gpt-oss closed with "the consensus is that Amazon is still considered a buy by several analysts". Each view was attributed, so the keyword check passed it, but the sentence is a verdict. Advice questions now come with an instruction not to sum analysts' views up into one. Llama's scores were unchanged by it.
+- **A false fail in the evaluation itself.** A correct Binance answer failed the fact check because gpt-oss wrote "North-Korean" with a non-breaking hyphen. Fact checks now ignore typography.
+
+Full per-question results: [`eval/results.md`](eval/results.md) (Llama) and [`eval/results-gpt-oss-20b.md`](eval/results-gpt-oss-20b.md).
 
 **Caveats.** 40 questions on one day's news is a small sample, so read the
 counts, not the percentages. The similarity floor and the recency decision

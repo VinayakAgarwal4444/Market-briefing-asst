@@ -56,6 +56,20 @@ _ADMITS_NOT_KNOWING = re.compile(
     re.I,
 )
 _CLOSED_BOOK_PROMPT = "You are a market news assistant. Answer the question about recent financial news."
+# Groq's free tier rate-limits a run of 68 calls; wait and retry rather than lose the run.
+_RETRIES = 6
+_RETRY_WAIT_SECONDS = 30
+
+
+def _with_retry(call):
+    for attempt in range(_RETRIES):
+        try:
+            return call()
+        except Exception as exc:  # noqa: BLE001 -- provider errors vary by client
+            if attempt == _RETRIES - 1:
+                raise
+            print(f"[eval] {type(exc.__cause__ or exc).__name__}; retrying in {_RETRY_WAIT_SECONDS}s", flush=True)
+            time.sleep(_RETRY_WAIT_SECONDS)
 
 
 @dataclass
@@ -80,8 +94,13 @@ def has_source(story: Story, fragments: list[str]) -> bool:
     return any(f in item.url for item in story.items for f in fragments)
 
 
+# gpt-oss writes "North-Korean" and "0.4 %" with non-breaking hyphens and
+# narrow spaces; without this, a correct answer fails a plain substring check.
+_TYPOGRAPHY = str.maketrans({"\u2010": " ", "\u2011": " ", "-": " ", "\u00a0": " ", "\u202f": " "})
+
+
 def fact_recall(text: str, facts: list[str]) -> float:
-    low = text.lower()
+    low = text.lower().translate(_TYPOGRAPHY)
     return sum(any(alt in low for alt in fact.split("|")) for fact in facts) / len(facts)
 
 
@@ -131,7 +150,7 @@ def end_to_end(questions: list[dict], corpus: Corpus, baseline: bool) -> list[Ro
     for i, q in enumerate(questions, 1):
         print(f"[eval] {i}/{len(questions)} {q['q']}", flush=True)
         prepared = prepare(corpus, q["q"], with_quotes=False)
-        answer = finish(prepared, "".join(stream(prepared)))
+        answer = finish(prepared, _with_retry(lambda p=prepared: "".join(stream(p))))
         row = Row(
             q=q["q"], kind=q["kind"], n_context=len(answer.hits), abstained=answer.abstained,
             invalid=answer.invalid, advice_flagged=answer.advice,
@@ -143,7 +162,8 @@ def end_to_end(questions: list[dict], corpus: Corpus, baseline: bool) -> list[Ro
             row.facts = fact_recall(answer.text, q["facts"])
             row.cited_correct = any(has_source(answer.hits[n - 1].story, q["sources"]) for n in answer.cited)
             if baseline:
-                text = get_llm().invoke([SystemMessage(_CLOSED_BOOK_PROMPT), HumanMessage(q["q"])]).content
+                closed_book = [SystemMessage(_CLOSED_BOOK_PROMPT), HumanMessage(q["q"])]
+                text = _with_retry(lambda m=closed_book: get_llm().invoke(m).content)
                 row.baseline_facts = fact_recall(text, q["facts"])
                 row.baseline_admits = bool(_ADMITS_NOT_KNOWING.search(text))
         rows.append(row)
@@ -232,6 +252,7 @@ def main() -> int:
     parser.add_argument("--snapshot", default="", help="Snapshot name (default: the one in questions.yaml)")
     parser.add_argument("--no-llm", action="store_true", help="Retrieval ablation only")
     parser.add_argument("--no-baseline", action="store_true", help="Skip the closed-book baseline")
+    parser.add_argument("--out", default="results.md", help="Results file in eval/ (default: results.md)")
     args = parser.parse_args()
 
     started = time.time()
@@ -243,7 +264,7 @@ def main() -> int:
     # Quoted answers contain bullets and curly quotes; write them as character
     # references (they render the same) so the file stays plain ASCII.
     ascii_text = text.encode("ascii", "xmlcharrefreplace").decode("ascii")
-    (EVAL_DIR / "results.md").write_text(ascii_text, encoding="utf-8")
+    (EVAL_DIR / args.out).write_text(ascii_text, encoding="utf-8")
     print(text)
     return 0
 

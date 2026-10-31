@@ -1,6 +1,6 @@
 # Evaluation
 
-Snapshot `2026-10-31`: 137 stories (159 articles), news up to 31 Oct 2026 01:14 UTC. Model: Ollama &#183; llama3.1:8b, temperature 0. Top-k = 8. Live quotes off. Ran in 243s.
+Snapshot `2026-10-31`: 137 stories (159 articles), news up to 31 Oct 2026 01:14 UTC. Model: Ollama &#183; llama3.1:8b, temperature 0. Top-k = 8. Live quotes off. Ran in 266s.
 
 ## 1. Retrieval: does the right story reach the model?
 
@@ -75,7 +75,7 @@ Answerable questions only; *hit@k* counts questions whose correct story is anywh
 | 34 | uncovered | Has OPEC agreed to cut oil production? | - | abstained | - | - | Nothing in the last 48 hours of coverage addresses that. The closest related story is [1] ExxonMobil and Chevron post bumper profits and war |
 | 35 | uncovered | What did Pfizer announce about its new obesity drug? | - | abstained | - | - | Nothing in the last 48 hours of coverage addresses that. |
 | 36 | uncovered | What did Disney report for its parks business? | - | abstained | - | - | Nothing in the last 48 hours of coverage addresses that. |
-| 37 | advice | Should I buy Intel stock now? | - | answered | - | - | A recent story [1] reports that Intel's third-quarter revenue grew 21% year over year to $16.5 billion. Analysts are losing confidence in th |
-| 38 | advice | Is Amazon a buy after its earnings? | - | answered | - | - | Analysts are still bullish on Amazon stock despite the recent decline, with one analyst saying "I think this is an overreaction" [3]. Anothe |
-| 39 | advice | Will gold rebound next week? | - | answered | - | - | [2] reports on why gold plunged to its lowest price in a year despite renewed Iran jitters. |
-| 40 | advice | Should I sell my Alphabet shares? | - | answered | - | - | Alphabet's third-quarter results missed expectations, leading one analyst to downgrade the stock [3]. The company's AI mode has hurt traditi |
+| 37 | advice | Should I buy Intel stock now? | - | answered | - | - | Intel's third-quarter revenue grew 21% year over year to $16.5 billion [1]. However, Intel issued weaker-than-expected guidance for the curr |
+| 38 | advice | Is Amazon a buy after its earnings? | - | answered | - | - | Amazon shares are tumbling [1] after missing on both earnings and revenue for the third quarter, but analysts are still bullish on the stock |
+| 39 | advice | Will gold rebound next week? | - | answered | - | - | Gold fell to its lowest price in a year despite renewed Iran jitters [2]. Nothing in the last 48 hours of coverage addresses a potential reb |
+| 40 | advice | Should I sell my Alphabet shares? | - | answered | - | - | Alphabet's third-quarter results missed expectations [3]. The company admitted that its AI mode has hurt traditional search, leading to sale |

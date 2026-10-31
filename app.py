@@ -29,7 +29,9 @@ except (FileNotFoundError, AttributeError):
 from config import BRIEFING_WINDOW_HOURS, REFRESH_MINUTES, SEARCH_WINDOW_HOURS  # noqa: E402
 from src import refresh, store  # noqa: E402
 from src.briefing import prepare_briefing, top_stories  # noqa: E402
-from src.chain import ADVICE_NOTICE, Answer, Corpus, Prepared, ago, finish, prepare, stream  # noqa: E402
+from src.chain import (  # noqa: E402
+    ADVICE_NOTICE, Answer, Corpus, Prepared, ago, finish, normalize_citations, prepare, stream,
+)
 from src.llm import ProviderUnavailableError, model_label  # noqa: E402
 from src.market import WATCHLIST, Quote, get_quotes  # noqa: E402
 
@@ -178,6 +180,9 @@ def sources_block(answer: Answer, now: float) -> None:
             st.warning(f"The answer cites {', '.join(answer.invalid)}, which it was not given. Treat that part with care.")
     if answer.unsupported:
         st.warning(f"Not found in any source: {', '.join(answer.unsupported)}. Check before relying on it.")
+    if answer.hits and not cited and not answer.abstained:
+        # gpt-oss occasionally drops every citation tag; say so rather than look sourced.
+        st.caption("This answer didn't mark its sources. The stories it was given are listed under Sources.")
 
 
 def run_llm(prepared: Prepared) -> Answer:
@@ -186,7 +191,7 @@ def run_llm(prepared: Prepared) -> Answer:
     text = ""
     for chunk in stream(prepared):
         text += chunk
-        box.markdown(tidy(text) + " ...")
+        box.markdown(tidy(normalize_citations(text)) + " ...")
     answer = finish(prepared, text)  # may trim an unsupported tail; show the checked version
     box.markdown(link_citations(answer.text, prepared))
     return answer

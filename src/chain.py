@@ -187,7 +187,13 @@ def prepare(
     hits = corpus.index.search(search_text, k=k, extra_terms=symbol_terms(symbols), now=corpus.now)
     quotes = get_quotes(symbols) if with_quotes else []
     advice = bool(_ADVICE_RE.search(question))
-    prompt = f"Summarise what has been reported that is relevant to this question: {question}" if advice else question
+    # gpt-oss, given only the first line, closed an Amazon answer with "the
+    # consensus is that Amazon is still considered a buy" -- advice by proxy.
+    prompt = (
+        f"Summarise what has been reported that is relevant to this question: {question}\n"
+        "Report facts and attribute each view to whoever holds it. Do not say whether to buy, sell or hold, "
+        "and do not sum analysts' views up into a verdict such as \"it is still a buy\"."
+    ) if advice else question
     messages = build_messages(prompt, hits, quotes, corpus.now, history)
     return Prepared(question, hits, quotes, messages, advice)
 
@@ -266,7 +272,18 @@ def unsupported_numbers(text: str, prepared: Prepared) -> list[str]:
     return found
 
 
+# gpt-oss was trained to cite with lenticular brackets (U+3010/U+3011),
+# with or without a line reference after a dagger, and sometimes does so
+# despite the prompt. Normalise to [1] before anything checks citations.
+_LENTICULAR_RE = re.compile("\u3010(\\d+|M)[^\u3011]*\u3011")
+
+
+def normalize_citations(text: str) -> str:
+    return _LENTICULAR_RE.sub(r"[\1]", text)
+
+
 def finish(prepared: Prepared, text: str) -> Answer:
+    text = normalize_citations(text)
     if text.strip().startswith("Nothing in the last"):
         text = trim_after_abstaining(text, len(prepared.hits))
         rest = text.partition(".")[2].strip()
