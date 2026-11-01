@@ -191,7 +191,7 @@ def _fetch_quote(symbol: str) -> Quote | None:
     try:
         info = yf.Ticker(symbol).info
     except Exception as exc:  # yfinance raises a zoo of errors for unknown symbols
-        _note(f"{type(exc).__name__}: {exc}"[:160])
+        _note(f"{last_error}; fallback {type(exc).__name__}: {exc}"[:240])
         return None
     price = info.get("regularMarketPrice")
     prev = info.get("regularMarketPreviousClose")
