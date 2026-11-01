@@ -123,7 +123,59 @@ def symbol_terms(symbols: list[str]) -> list[str]:
     return terms
 
 
+def _chart_quote(symbol: str) -> Quote | None:
+    """The quote from Yahoo's chart endpoint.
+
+    The hosted app got no quotes at all from ``Ticker.info`` (the heavier
+    quoteSummary endpoint, which needs a session crumb) while it worked
+    from a home connection. The chart endpoint gives the same price and
+    previous close in one lighter request.
+    """
+    ticker = yf.Ticker(symbol)
+    try:
+        bars = ticker.history(period="1d")
+        prev = ticker.history_metadata.get("chartPreviousClose")
+        if bars.empty:
+            # Futures have no bars for "today" at the weekend; the day before
+            # the last session is then the previous close.
+            bars = ticker.history(period="5d")
+            prev = float(bars["Close"].iloc[-2]) if len(bars) > 1 else None
+        meta = ticker.history_metadata
+    except Exception:
+        return None
+    price = meta.get("regularMarketPrice")
+    if price is None or not prev:
+        return None
+    as_of = _epoch(meta.get("regularMarketTime")) or time.time()
+    session = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+    start, end = _epoch(session.get("start")), _epoch(session.get("end"))
+    # Yahoo gives futures a session spanning all of Sunday; no trade since
+    # it began means the market is shut.
+    open_now = start and end and start <= time.time() < end and as_of >= start
+    state = ("REGULAR" if open_now else "CLOSED") if start and end else ""
+    return Quote(
+        symbol=symbol,
+        name=WATCHLIST.get(symbol) or meta.get("shortName") or symbol,
+        price=float(price),
+        previous_close=float(prev),
+        change_pct=(price / prev - 1) * 100,
+        as_of=as_of,
+        currency=meta.get("currency") or "",
+        market_state=state,
+    )
+
+
+def _epoch(value) -> float | None:
+    """yfinance gives chart times as pandas Timestamps; older versions as seconds."""
+    if value is None:
+        return None
+    return value.timestamp() if hasattr(value, "timestamp") else float(value)
+
+
 def _fetch_quote(symbol: str) -> Quote | None:
+    quote = _chart_quote(symbol)
+    if quote:
+        return quote
     try:
         info = yf.Ticker(symbol).info
     except Exception:  # yfinance raises a zoo of errors for unknown symbols

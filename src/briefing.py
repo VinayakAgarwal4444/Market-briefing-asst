@@ -21,8 +21,7 @@ BRIEFING_PROMPT = """You write a short market briefing. It is now {now}.
 Use ONLY the STORIES and MARKET DATA below, which cover the last {hours} hours.
 
 Write:
-1. A line starting "Markets:" that states the moves in MARKET DATA in one sentence, ending with [M].
-2. Then the five most market-moving stories as bullet points, most important first. Each bullet starts with a bold label of two to four words, then one or two sentences, and ends with the story's citation, like [3].
+{markets_line}the five most market-moving stories as bullet points, most important first. Each bullet starts with a bold label of two to four words, then one or two sentences, and ends with the story's citation, like [3].
 
 Rules: never state a number that is not in STORIES or MARKET DATA. No advice or predictions. No headings, no introduction, no conclusion.
 
@@ -31,6 +30,8 @@ MARKET DATA (Yahoo Finance; cite as [M]):
 
 STORIES (numbered; the same event reported by several outlets is grouped):
 {news}"""
+
+MARKETS_LINE = 'A line starting "Markets:" that states the moves in MARKET DATA in one sentence, ending with [M]. Then '
 
 
 def _is_noise(story: Story) -> bool:
@@ -55,6 +56,11 @@ def prepare_briefing(corpus: Corpus, quotes: list[Quote], hours: int = BRIEFING_
     hits = [Hit(s, importance(s, corpus.now), 1.0, False) for s in stories]
     news = "\n\n".join(format_story(n, s, corpus.now) for n, s in enumerate(stories, 1)) or "(no stories)"
     market = "\n".join(f"- {format_quote(q)}" for q in quotes) or "(unavailable)"
-    system = BRIEFING_PROMPT.format(now=utc(corpus.now), hours=hours, market=market, news=news)
+    # With no quotes, gpt-oss still wrote a "Markets:" line -- "No significant
+    # moves reported [M]" -- so the line is only asked for when there is data.
+    markets_line = MARKETS_LINE if quotes else ""
+    system = BRIEFING_PROMPT.format(
+        now=utc(corpus.now), hours=hours, market=market, news=news, markets_line=markets_line
+    )
     messages = [SystemMessage(system), HumanMessage("Write the briefing.")]
     return Prepared("briefing", hits, quotes, messages)

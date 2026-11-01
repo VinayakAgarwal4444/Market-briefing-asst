@@ -222,9 +222,18 @@ def briefing_card(corpus: Corpus, refreshed_at: float, quotes: list[Quote]) -> N
         else:
             try:
                 prepared = prepare_briefing(corpus, quotes)
-                answer = run_llm(prepared)
-                briefings.clear()  # keep only the briefing for the current refresh
-                briefings[refreshed_at] = link_citations(answer.text, prepared)
+                # The hosted model once returned only the "Markets:" line, and
+                # every visitor saw that until the next refresh. A briefing
+                # that cites no story gets one retry and is never cached.
+                slot = st.empty()
+                for _ in range(2):
+                    with slot.container():
+                        answer = run_llm(prepared)
+                    if answer.cited or not prepared.hits:
+                        break
+                if answer.cited:
+                    briefings.clear()  # keep only the briefing for the current refresh
+                    briefings[refreshed_at] = link_citations(answer.text, prepared)
             except ProviderUnavailableError as exc:
                 st.error(str(exc))
         st.caption(
