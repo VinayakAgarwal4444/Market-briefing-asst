@@ -123,6 +123,16 @@ def symbol_terms(symbols: list[str]) -> list[str]:
     return terms
 
 
+# Why the last lookup failed, so the app can say why prices are missing
+# rather than just leaving them out.
+last_error = ""
+
+
+def _note(error: str) -> None:
+    global last_error
+    last_error = error
+
+
 def _chart_quote(symbol: str) -> Quote | None:
     """The quote from Yahoo's chart endpoint.
 
@@ -141,10 +151,12 @@ def _chart_quote(symbol: str) -> Quote | None:
             bars = ticker.history(period="5d")
             prev = float(bars["Close"].iloc[-2]) if len(bars) > 1 else None
         meta = ticker.history_metadata
-    except Exception:
+    except Exception as exc:
+        _note(f"{type(exc).__name__}: {exc}"[:160])
         return None
     price = meta.get("regularMarketPrice")
     if price is None or not prev:
+        _note(f"no price for {symbol}")
         return None
     as_of = _epoch(meta.get("regularMarketTime")) or time.time()
     session = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
@@ -178,7 +190,8 @@ def _fetch_quote(symbol: str) -> Quote | None:
         return quote
     try:
         info = yf.Ticker(symbol).info
-    except Exception:  # yfinance raises a zoo of errors for unknown symbols
+    except Exception as exc:  # yfinance raises a zoo of errors for unknown symbols
+        _note(f"{type(exc).__name__}: {exc}"[:160])
         return None
     price = info.get("regularMarketPrice")
     prev = info.get("regularMarketPreviousClose")

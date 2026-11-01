@@ -33,6 +33,7 @@ from src.chain import (  # noqa: E402
     ADVICE_NOTICE, Answer, Corpus, Prepared, ago, finish, normalize_citations, prepare, stream,
 )
 from src.llm import ProviderUnavailableError, model_label  # noqa: E402
+from src import market  # noqa: E402
 from src.market import WATCHLIST, Quote, get_quotes  # noqa: E402
 
 st.set_page_config(page_title="Market Briefing", page_icon=":chart_with_upwards_trend:", layout="centered")
@@ -249,6 +250,9 @@ def briefing_page() -> None:
     quotes = watchlist_quotes()
     if quotes:
         ticker_strip(quotes)
+    else:
+        reason = market.last_error or "no response"
+        st.caption(f"Live prices are unavailable right now (Yahoo Finance: {reason}).")
 
     briefing_card(corpus, refreshed_at, quotes)
 
